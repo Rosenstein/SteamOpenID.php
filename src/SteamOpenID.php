@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace xPaw\Steam;
 
+use Exception;
+use InvalidArgumentException;
+
 /**
  * A correct and simple implementation of OpenID authentication for Steam.
  *
@@ -19,97 +22,219 @@ namespace xPaw\Steam;
  */
 class SteamOpenID
 {
-	/*
-	 * Validates OpenID data, and verifies with Steam
-	 *
-	 * @param string $SelfURL Full URL of where the login page is
-	 *
-	 * @return ?string Returns the 64-bit SteamID if successful or null on failure
+	public const SERVER = 'https://steamcommunity.com/openid/login';
+	private const OPENID_NS = 'http://specs.openid.net/auth/2.0';
+	private const EXPECTED_SIGNED = 'signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle';
+
+	/**
+	 * URL to return to from Steam, this will also validate the "openid.return_to" parameter.
 	 */
-	public static function ValidateLogin( string $SelfURL ) : ?string
+	public readonly string $ReturnURL;
+
+	/** @var ?array<string, mixed> */
+	protected readonly ?array $InputParameters;
+
+	/**
+	 * @param string $ReturnURL URL to return to from Steam, this will also validate the "openid.return_to" parameter
+	 * @param ?array<string, mixed> $Params Request parameters provided in the GET parameters
+	 */
+	public function __construct( string $ReturnURL, ?array $Params = null )
 	{
-		// PHP automatically replaces dots with underscores in GET parameters
-		// See https://www.php.net/variables.external#language.variables.external.dot-in-names
-		if( filter_input( INPUT_GET, 'openid_mode' ) !== 'id_res' )
+		$this->ReturnURL = $ReturnURL;
+		$this->InputParameters = $Params;
+	}
+
+	/**
+	 * Get the Steam login url.
+	 *
+	 * @return string The authentication url.
+	 */
+	public function GetAuthUrl() : string
+	{
+		return SteamOpenID::SERVER . '?' . http_build_query( $this->GetAuthParameters() );
+	}
+
+	/**
+	 * Get the OpenID parameters to be rendered as form <input> variables or to construct the redirect url.
+	 *
+	 * @return array<string, string>
+	 */
+	public function GetAuthParameters() : array
+	{
+		return [
+			'openid.identity' => 'http://specs.openid.net/auth/2.0/identifier_select',
+			'openid.claimed_id' => 'http://specs.openid.net/auth/2.0/identifier_select',
+			'openid.ns' => 'http://specs.openid.net/auth/2.0',
+			'openid.mode' => 'checkid_setup',
+			'openid.return_to' => $this->ReturnURL,
+		];
+	}
+
+	/**
+	 * Validates OpenID data, and verifies with Steam.
+	 *
+	 * @throws InvalidArgumentException Thrown when manipulation of the input parameters is detected.
+	 * @throws Exception Login failed to be validated against Steam servers.
+	 *
+	 * @return string Returns the CommunityID when validation succeeds
+	 */
+	public function Validate() : string
+	{
+		$Arguments = $this->GetArguments();
+
+		if( $Arguments[ 'openid_mode' ] !== 'id_res' )
 		{
-			return null;
+			throw new InvalidArgumentException( 'Wrong openid_mode.' );
 		}
 
-		// See http://openid.net/specs/openid-authentication-2_0.html#positive_assertions
-		$Arguments = filter_input_array( INPUT_GET, [
-			'openid_ns' => FILTER_SANITIZE_URL,
-			'openid_op_endpoint' => FILTER_SANITIZE_URL,
-			'openid_claimed_id' => FILTER_SANITIZE_URL,
-			'openid_identity' => FILTER_SANITIZE_URL,
-			'openid_return_to' => FILTER_SANITIZE_URL, // Should equal to url we sent
-			'openid_response_nonce' => FILTER_SANITIZE_SPECIAL_CHARS,
-			'openid_assoc_handle' => FILTER_SANITIZE_SPECIAL_CHARS, // Steam just sends 1234567890
-			'openid_signed' => FILTER_SANITIZE_SPECIAL_CHARS,
-			'openid_sig' => FILTER_SANITIZE_SPECIAL_CHARS
-		], true );
-
-		if( !is_array( $Arguments ) )
+		if( $Arguments[ 'openid_claimed_id' ] !== $Arguments[ 'openid_identity' ] )
 		{
-			return null;
+			throw new InvalidArgumentException( 'Wrong openid_claimed_id, should equal to openid_identity.' );
 		}
 
-		foreach( $Arguments as $Value )
+		if( $Arguments[ 'openid_ns' ] !== self::OPENID_NS )
 		{
-			// An array value will be FALSE if the filter fails, or NULL if the variable is not set.
-			// In our case we want everything to be a string.
-			if( !is_string( $Value ) )
+			throw new InvalidArgumentException( 'Wrong openid_ns.' );
+		}
+
+		if( $Arguments[ 'openid_op_endpoint' ] !== self::SERVER )
+		{
+			throw new InvalidArgumentException( 'Wrong openid_op_endpoint.' );
+		}
+
+		if( $Arguments[ 'openid_signed' ] !== self::EXPECTED_SIGNED )
+		{
+			throw new InvalidArgumentException( 'Wrong openid_signed.' );
+		}
+
+		if( !str_starts_with( $Arguments[ 'openid_return_to' ], $this->ReturnURL ) )
+		{
+			throw new InvalidArgumentException( 'Wrong openid_return_to.' );
+		}
+
+		if( preg_match( '/^https:\/\/steamcommunity.com\/openid\/id\/(?<id>7656119[0-9]{10})\/?$/', $Arguments[ 'openid_identity' ], $CommunityID ) !== 1 )
+		{
+			throw new InvalidArgumentException( 'Wrong openid_identity.' );
+		}
+
+		$Arguments[ 'openid_mode' ] = 'check_authentication'; // Add mode for verification
+
+		[ $Code, $Response ] = $this->SendSteamRequest( $Arguments );
+
+		if( $Code !== 200 )
+		{
+			if( $Code === 403 || $Code === 429 )
 			{
-				return null;
+				throw new Exception( 'For some bizzare reason Valve rate limits the OpenID endpoint, and thus we are currently unable to verify your login. Please try again in a couple of minutes.' );
 			}
+
+			throw new Exception( 'Failed to verify your login with Steam, it could be down (HTTP ' . $Code . '). Please try again in a couple of minutes. Check Steam\'s status at https://steamstat.us.' );
 		}
 
-		if( $Arguments[ 'openid_claimed_id' ] !== $Arguments[ 'openid_identity' ]
-		|| $Arguments[ 'openid_op_endpoint' ] !== 'https://steamcommunity.com/openid/login'
-		|| $Arguments[ 'openid_ns' ] !== 'http://specs.openid.net/auth/2.0'
-		|| strpos( $Arguments[ 'openid_return_to' ], $SelfURL ) !== 0
-		|| preg_match( '/^https?:\/\/steamcommunity.com\/openid\/id\/(7656119[0-9]{10})\/?$/', $Arguments[ 'openid_identity' ], $CommunityID ) !== 1
-		)
+		$KeyValues = self::ParseKeyValues( $Response );
+
+		if( ( $KeyValues[ 'ns' ] ?? null ) !== self::OPENID_NS )
 		{
-			return null;
+			throw new Exception( 'Failed to verify login your with Steam, not a valid OpenID 2.0 response.' );
 		}
 
-		$Arguments[ 'openid_mode' ] = 'check_authentication';
+		if( ( $KeyValues[ 'is_valid' ] ?? '' ) !== 'true' )
+		{
+			throw new Exception( 'Failed to verify login your with Steam.' );
+		}
 
+		return $CommunityID[ 'id' ];
+	}
+
+	/**
+	 * Checks whether the query parameters indicate that the login should be verified.
+	 */
+	public function ShouldValidate() : bool
+	{
+		if( $this->InputParameters === null )
+		{
+			$Mode = filter_input( INPUT_GET, 'openid_mode' );
+		}
+		else
+		{
+			$Mode = $this->InputParameters[ 'openid_mode' ] ?? null;
+		}
+
+		return $Mode === 'id_res';
+	}
+
+	/**
+	 * Sends a request to the Steam OpenID server and returns the response to be validated.
+	 *
+	 * You can override this method to send the request yourself.
+	 *
+	 * @codeCoverageIgnore
+	 * @param array<string, string> $Arguments Parameters to send as POST fields.
+	 * @return array{0: int, 1: string} A tuple that contains [http code as int, response as string]
+	 */
+	public function SendSteamRequest( array $Arguments ) : array
+	{
 		$c = curl_init( );
 
 		curl_setopt_array( $c, [
 			CURLOPT_USERAGENT      => 'OpenID Verification (+https://github.com/xPaw/SteamOpenID.php)',
-			CURLOPT_URL            => 'https://steamcommunity.com/openid/login',
 			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_URL            => self::SERVER,
 			CURLOPT_CONNECTTIMEOUT => 6,
 			CURLOPT_TIMEOUT        => 6,
 			CURLOPT_POST           => true,
 			CURLOPT_POSTFIELDS     => $Arguments,
 		] );
 
-		$Response = curl_exec( $c );
+		$Response = (string)curl_exec( $c );
 		$Code = curl_getinfo( $c, CURLINFO_HTTP_CODE );
 
-		curl_close( $c );
+		return [ $Code, $Response ];
+	}
 
-		if( $Code !== 200 )
+	/** @return array<string, string> */
+	private function GetArguments() : array
+	{
+		// See https://openid.net/specs/openid-authentication-2_0.html#positive_assertions
+		$Filters =
+		[
+			'openid_mode' => FILTER_UNSAFE_RAW,
+			'openid_ns' => FILTER_UNSAFE_RAW,
+			'openid_op_endpoint' => FILTER_UNSAFE_RAW,
+			'openid_claimed_id' => FILTER_UNSAFE_RAW,
+			'openid_identity' => FILTER_UNSAFE_RAW,
+			'openid_return_to' => FILTER_UNSAFE_RAW, // Should equal to url we sent
+			'openid_response_nonce' => FILTER_UNSAFE_RAW,
+			'openid_assoc_handle' => FILTER_UNSAFE_RAW, // Steam just sends 1234567890
+			'openid_signed' => FILTER_UNSAFE_RAW,
+			'openid_sig' => FILTER_UNSAFE_RAW
+		];
+
+		if( $this->InputParameters === null )
 		{
-			return null;
+			$Arguments = filter_input_array( INPUT_GET, $Filters );
+		}
+		else
+		{
+			$Arguments = filter_var_array( $this->InputParameters, $Filters );
 		}
 
-		$KeyValues = self::ParseKeyValues( (string)$Response );
-
-		if( ( $KeyValues[ 'ns' ] ?? null ) !== 'http://specs.openid.net/auth/2.0' )
+		if( !is_array( $Arguments ) ) // @phpstan-ignore-line
 		{
-			return null;
+			throw new InvalidArgumentException( 'Parameter filter failed.' );
 		}
 
-		if( ( $KeyValues[ 'is_valid' ] ?? null ) !== 'true' )
+		foreach( $Arguments as $Key => $Value )
 		{
-			return null;
+			// An array value will be FALSE if the filter fails, or NULL if the variable is not set.
+			// In our case we want everything to be a string.
+			if( empty( $Value ) || !is_string( $Value ) ) // @phpstan-ignore-line
+			{
+				throw new InvalidArgumentException( 'Wrong ' . $Key . ' is not a string' );
+			}
 		}
 
-		return $CommunityID[ 1 ];
+		return $Arguments;
 	}
 
 	/** @return array<string, string> */
@@ -119,7 +244,7 @@ class SteamOpenID
 		// followed by a colon, and the value associated with the key. The line is terminated
 		// by a single newline (UCS codepoint 10, "\n"). A key or value MUST NOT contain a
 		// newline and a key also MUST NOT contain a colon.
-		$ResponseLines = explode( "\n", (string)$Response );
+		$ResponseLines = explode( "\n", $Response );
 		$ResponseKeys = [];
 
 		foreach( $ResponseLines as $Line )
