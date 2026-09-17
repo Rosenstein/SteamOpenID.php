@@ -27,6 +27,10 @@ See [Example.php](Example.php) file for example usage.
 ```php
 use xPaw\Steam\SteamOpenID;
 
+// Hardcode the callback URL. Never build it from $_SERVER['HTTP_HOST'] or the request path:
+// it is the audience the signed assertion is checked against, so the client must not be able to choose it.
+$ReturnToUrl = 'https://example.com/login.php';
+
 $SteamOpenID = new SteamOpenID( $ReturnToUrl );
 
 if( $SteamOpenID->ShouldValidate() )
@@ -34,7 +38,7 @@ if( $SteamOpenID->ShouldValidate() )
 	try
 	{
 		$CommunityID = $SteamOpenID->Validate();
-		echo 'Logged in as ' . $SteamID;
+		echo 'Logged in as ' . $CommunityID;
 	}
 	catch( Exception $e )
 	{
@@ -85,7 +89,7 @@ class CustomSteamOpenID extends SteamOpenID
 		] );
 
 		// array(http code as int, response as string)
-		return [ $response->getStatusCode(), $response->getBody() ];
+		return [ $response->getStatusCode(), (string)$response->getBody() ];
 	}
 }
 
