@@ -148,7 +148,7 @@ class SteamOpenID
 			throw new InvalidArgumentException( 'Nonce timestamp is too old.' );
 		}
 
-		if( preg_match( '/^https:\/\/steamcommunity.com\/openid\/id\/(?<id>76561[0-9]{12})\/?$/', $Arguments[ 'openid_identity' ], $CommunityID ) !== 1 )
+		if( preg_match( '/^https:\/\/steamcommunity\.com\/openid\/id\/(?<id>76561[0-9]{12})\/?$/D', $Arguments[ 'openid_identity' ], $CommunityID ) !== 1 )
 		{
 			throw new InvalidArgumentException( 'Wrong openid_identity.' );
 		}

@@ -1362,6 +1362,177 @@ final class OpenIDTest extends TestCase
 
 		$this->assertFalse( $openid->RequestWasSent );
 	}
+
+	public function testFailLoginForCrlfResponse() : void
+	{
+		// A reply using CRLF line endings leaves "\r" in every value, so "is_valid" is not exactly "true"
+		$input = self::GetDefaultInput();
+		$input[ 'openid_sig' ] = 'test_hack_return_crlf_response';
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php', $input );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( Exception $e )
+		{
+			$this->assertMatchesRegularExpression( '/Failed to verify your login with Steam/', $e->getMessage() );
+		}
+
+		$this->assertTrue( $openid->RequestWasSent );
+	}
+
+	public function testFailLoginForDuplicateIsValidKeyWithFalseLast() : void
+	{
+		// Duplicate keys are last-wins, so "is_valid:true" followed by "is_valid:false" must be rejected
+		$input = self::GetDefaultInput();
+		$input[ 'openid_sig' ] = 'test_hack_return_duplicate_is_valid';
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php', $input );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( Exception $e )
+		{
+			$this->assertMatchesRegularExpression( '/Failed to verify your login with Steam/', $e->getMessage() );
+		}
+
+		$this->assertTrue( $openid->RequestWasSent );
+	}
+
+	public function testFailLoginForIsValidWithTrailingSpace() : void
+	{
+		$input = self::GetDefaultInput();
+		$input[ 'openid_sig' ] = 'test_hack_return_is_valid_trailing_space';
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php', $input );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( Exception $e )
+		{
+			$this->assertMatchesRegularExpression( '/Failed to verify your login with Steam/', $e->getMessage() );
+		}
+
+		$this->assertTrue( $openid->RequestWasSent );
+	}
+
+	public function testWithoutInputParametersReadsGetAndFailsClosed() : void
+	{
+		// The InputParameters === null path reads the real request via filter_input(); under the CLI there
+		// are no GET variables, so ShouldValidate() must be false and Validate() must fail before any request
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php' );
+
+		$this->assertFalse( $openid->ShouldValidate() );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( InvalidArgumentException $e )
+		{
+			$this->assertMatchesRegularExpression( '/Parameter filter failed|openid_mode is not a string/', $e->getMessage() );
+		}
+
+		$this->assertFalse( $openid->RequestWasSent );
+	}
+
+	public function testReturnURLQueryTokenMismatchIsRejected() : void
+	{
+		// A per-session token placed in the ReturnURL query string is covered by Steam's signature over
+		// return_to and by the prefix check, so a callback carrying a different token must be rejected
+		$input = self::GetDefaultInput();
+		$input[ 'openid_return_to' ] = 'https://localhost/SteamOpenID/Example.php?state=attackertoken';
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php?state=victimtoken', $input );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( InvalidArgumentException $e )
+		{
+			$this->assertMatchesRegularExpression( '/Wrong openid_return_to/', $e->getMessage() );
+		}
+
+		$this->assertFalse( $openid->RequestWasSent );
+	}
+
+	public function testReturnURLQueryTokenMissingIsRejected() : void
+	{
+		$input = self::GetDefaultInput();
+		$input[ 'openid_return_to' ] = 'https://localhost/SteamOpenID/Example.php';
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php?state=victimtoken', $input );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( InvalidArgumentException $e )
+		{
+			$this->assertMatchesRegularExpression( '/Wrong openid_return_to/', $e->getMessage() );
+		}
+
+		$this->assertFalse( $openid->RequestWasSent );
+	}
+
+	public function testReturnURLQueryTokenMatchIsAccepted() : void
+	{
+		$input = self::GetDefaultInput();
+		$input[ 'openid_return_to' ] = 'https://localhost/SteamOpenID/Example.php?state=victimtoken';
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php?state=victimtoken', $input );
+
+		$this->assertEquals( 'https://localhost/SteamOpenID/Example.php?state=victimtoken', $openid->GetAuthParameters()[ 'openid.return_to' ] );
+		$this->assertEquals( '76561197972494985', $openid->Validate() );
+		$this->assertTrue( $openid->RequestWasSent );
+	}
+
+	public function testAuthUrlPercentEncodesHtmlSpecialCharactersInReturnURL() : void
+	{
+		$openid = new SteamOpenID( 'https://example.com/login"><u>x&y' );
+
+		$url = $openid->GetAuthUrl();
+
+		$this->assertStringContainsString( 'openid.return_to=https%3A%2F%2Fexample.com%2Flogin%22%3E%3Cu%3Ex%26y', $url );
+		$this->assertStringNotContainsString( '"', $url );
+		$this->assertStringNotContainsString( '<', $url );
+	}
+
+	public function testIdentityRegexRejectsLookAlikeHost() : void
+	{
+		// The dot in "steamcommunity.com" must be a literal dot
+		$input = self::GetDefaultInput();
+		$input[ 'openid_identity' ] = 'https://steamcommunityXcom/openid/id/76561197972494985';
+		$input[ 'openid_claimed_id' ] = $input[ 'openid_identity' ];
+
+		$openid = new TestOpenID( 'https://localhost/SteamOpenID/Example.php', $input );
+
+		try
+		{
+			$openid->Validate();
+			$this->fail( 'Expected exception was not thrown' );
+		}
+		catch( InvalidArgumentException $e )
+		{
+			$this->assertMatchesRegularExpression( '/Wrong openid_identity/', $e->getMessage() );
+		}
+
+		$this->assertFalse( $openid->RequestWasSent );
+	}
+
 }
 
 class TestOpenID extends SteamOpenID
@@ -1411,6 +1582,9 @@ class TestOpenID extends SteamOpenID
 			case 'test_hack_return_is_valid_false': return [ 200, "ns:http://specs.openid.net/auth/2.0\nis_valid:false" ];
 			case 'test_hack_return_is_valid_maybe': return [ 200, "ns:http://specs.openid.net/auth/2.0\nis_valid:maybe" ];
 			case 'test_hack_return_whitespace_only': return [ 200, "   \n\t\n   " ];
+			case 'test_hack_return_crlf_response': return [ 200, "ns:http://specs.openid.net/auth/2.0\r\nis_valid:true\r\n" ];
+			case 'test_hack_return_duplicate_is_valid': return [ 200, "ns:http://specs.openid.net/auth/2.0\nis_valid:true\nis_valid:false" ];
+			case 'test_hack_return_is_valid_trailing_space': return [ 200, "ns:http://specs.openid.net/auth/2.0\nis_valid:true \n" ];
 			case 'test_hack_return_curl_failure': return [ 0, '' ];
 			default: throw new Exception( 'Unknown test openid_sig: ' . $Arguments[ 'openid_sig' ] );
 		}
