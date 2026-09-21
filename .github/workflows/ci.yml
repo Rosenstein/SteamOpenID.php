@@ -26,4 +26,4 @@ jobs:
       run: composer install --no-interaction --no-progress
 
     - name: Run tests
-      run: composer test -- --coverage-text
+      run: composer test -- --coverage-text --path-coverage

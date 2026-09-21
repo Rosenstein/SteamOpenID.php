@@ -41,7 +41,7 @@ class SteamOpenID
 	 */
 	public function __construct( string $ReturnURL, ?array $Params = null )
 	{
-		$parsed = parse_url( $ReturnURL );
+		$parsed = \parse_url( $ReturnURL );
 
 		if( $parsed === false )
 		{
@@ -74,7 +74,7 @@ class SteamOpenID
 	 */
 	public function GetAuthUrl() : string
 	{
-		return self::SERVER . '?' . http_build_query( $this->GetAuthParameters() );
+		return self::SERVER . '?' . \http_build_query( $this->GetAuthParameters() );
 	}
 
 	/**
@@ -130,25 +130,25 @@ class SteamOpenID
 			throw new InvalidArgumentException( 'Wrong openid_signed.' );
 		}
 
-		if( !str_starts_with( $Arguments[ 'openid_return_to' ], $this->ReturnURL ) )
+		if( !\str_starts_with( $Arguments[ 'openid_return_to' ], $this->ReturnURL ) )
 		{
 			throw new InvalidArgumentException( 'Wrong openid_return_to.' );
 		}
 
 		// RFC3339 YYYY-MM-DDTHH:MM:SSZ followed by unique characters
-		if( preg_match( '/^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)/', $Arguments[ 'openid_response_nonce' ], $NonceMatch ) !== 1 )
+		if( \preg_match( '/^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)/', $Arguments[ 'openid_response_nonce' ], $NonceMatch ) !== 1 )
 		{
 			throw new InvalidArgumentException( 'Wrong openid_response_nonce.' );
 		}
 
-		$NonceTime = strtotime( $NonceMatch[ 1 ] );
+		$NonceTime = \strtotime( $NonceMatch[ 1 ] );
 
-		if( $NonceTime === false || abs( time() - $NonceTime ) > 300 )
+		if( $NonceTime === false || \abs( \time() - $NonceTime ) > 300 )
 		{
 			throw new InvalidArgumentException( 'Nonce timestamp is too old.' );
 		}
 
-		if( preg_match( '/^https:\/\/steamcommunity\.com\/openid\/id\/(?<id>76561[0-9]{12})\/?$/D', $Arguments[ 'openid_identity' ], $CommunityID ) !== 1 )
+		if( \preg_match( '/^https:\/\/steamcommunity\.com\/openid\/id\/(?<id>76561[0-9]{12})\/?$/D', $Arguments[ 'openid_identity' ], $CommunityID ) !== 1 )
 		{
 			throw new InvalidArgumentException( 'Wrong openid_identity.' );
 		}
@@ -189,7 +189,7 @@ class SteamOpenID
 	{
 		if( $this->InputParameters === null )
 		{
-			$Mode = filter_input( INPUT_GET, 'openid_mode' );
+			$Mode = \filter_input( \INPUT_GET, 'openid_mode' );
 		}
 		else
 		{
@@ -212,20 +212,20 @@ class SteamOpenID
 	 */
 	public function SendSteamRequest( array $Arguments ) : array
 	{
-		$c = curl_init( );
+		$c = \curl_init( );
 
-		curl_setopt_array( $c, [
-			CURLOPT_USERAGENT      => 'OpenID Verification (+https://github.com/xPaw/SteamOpenID.php)',
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_URL            => self::SERVER,
-			CURLOPT_CONNECTTIMEOUT => 6,
-			CURLOPT_TIMEOUT        => 6,
-			CURLOPT_POST           => true,
-			CURLOPT_POSTFIELDS     => $Arguments,
+		\curl_setopt_array( $c, [
+			\CURLOPT_USERAGENT      => 'OpenID Verification (+https://github.com/xPaw/SteamOpenID.php)',
+			\CURLOPT_RETURNTRANSFER => true,
+			\CURLOPT_URL            => self::SERVER,
+			\CURLOPT_CONNECTTIMEOUT => 6,
+			\CURLOPT_TIMEOUT        => 6,
+			\CURLOPT_POST           => true,
+			\CURLOPT_POSTFIELDS     => $Arguments,
 		] );
 
-		$Response = (string)curl_exec( $c );
-		$Code = curl_getinfo( $c, CURLINFO_HTTP_CODE );
+		$Response = (string)\curl_exec( $c );
+		$Code = \curl_getinfo( $c, \CURLINFO_HTTP_CODE );
 
 		return [ $Code, $Response ];
 	}
@@ -236,28 +236,28 @@ class SteamOpenID
 		// See https://openid.net/specs/openid-authentication-2_0.html#positive_assertions
 		$Filters =
 		[
-			'openid_mode' => FILTER_UNSAFE_RAW,
-			'openid_ns' => FILTER_UNSAFE_RAW,
-			'openid_op_endpoint' => FILTER_UNSAFE_RAW,
-			'openid_claimed_id' => FILTER_UNSAFE_RAW,
-			'openid_identity' => FILTER_UNSAFE_RAW,
-			'openid_return_to' => FILTER_UNSAFE_RAW, // Should equal to url we sent
-			'openid_response_nonce' => FILTER_UNSAFE_RAW,
-			'openid_assoc_handle' => FILTER_UNSAFE_RAW, // Steam just sends 1234567890
-			'openid_signed' => FILTER_UNSAFE_RAW,
-			'openid_sig' => FILTER_UNSAFE_RAW,
+			'openid_mode' => \FILTER_UNSAFE_RAW,
+			'openid_ns' => \FILTER_UNSAFE_RAW,
+			'openid_op_endpoint' => \FILTER_UNSAFE_RAW,
+			'openid_claimed_id' => \FILTER_UNSAFE_RAW,
+			'openid_identity' => \FILTER_UNSAFE_RAW,
+			'openid_return_to' => \FILTER_UNSAFE_RAW, // Should equal to url we sent
+			'openid_response_nonce' => \FILTER_UNSAFE_RAW,
+			'openid_assoc_handle' => \FILTER_UNSAFE_RAW, // Steam just sends 1234567890
+			'openid_signed' => \FILTER_UNSAFE_RAW,
+			'openid_sig' => \FILTER_UNSAFE_RAW,
 		];
 
 		if( $this->InputParameters === null )
 		{
-			$Arguments = filter_input_array( INPUT_GET, $Filters );
+			$Arguments = \filter_input_array( \INPUT_GET, $Filters );
 		}
 		else
 		{
-			$Arguments = filter_var_array( $this->InputParameters, $Filters );
+			$Arguments = \filter_var_array( $this->InputParameters, $Filters );
 		}
 
-		if( !is_array( $Arguments ) ) // @phpstan-ignore-line function.alreadyNarrowedType
+		if( !\is_array( $Arguments ) ) // @phpstan-ignore-line function.alreadyNarrowedType
 		{
 			throw new InvalidArgumentException( 'Parameter filter failed.' );
 		}
@@ -266,7 +266,7 @@ class SteamOpenID
 		{
 			// An array value will be FALSE if the filter fails, or NULL if the variable is not set.
 			// In our case we want everything to be a string.
-			if( empty( $Value ) || !is_string( $Value ) ) // @phpstan-ignore-line function.alreadyNarrowedType
+			if( empty( $Value ) || !\is_string( $Value ) ) // @phpstan-ignore-line function.alreadyNarrowedType
 			{
 				throw new InvalidArgumentException( 'Wrong ' . $Key . ' is not a string' );
 			}
@@ -282,12 +282,12 @@ class SteamOpenID
 		// followed by a colon, and the value associated with the key. The line is terminated
 		// by a single newline (UCS codepoint 10, "\n"). A key or value MUST NOT contain a
 		// newline and a key also MUST NOT contain a colon.
-		$ResponseLines = explode( "\n", $Response );
+		$ResponseLines = \explode( "\n", $Response );
 		$ResponseKeys = [];
 
 		foreach( $ResponseLines as $Line )
 		{
-			$Pair = explode( ':', $Line, 2 );
+			$Pair = \explode( ':', $Line, 2 );
 
 			if( !isset( $Pair[ 1 ] ) )
 			{
