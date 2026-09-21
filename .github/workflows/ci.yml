@@ -20,15 +20,10 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: ${{ matrix.php }}
+        coverage: xdebug
 
     - name: Install dependencies
       run: composer install --no-interaction --no-progress
 
     - name: Run tests
-      run: composer test
-
-    - name: Upload coverage
-      uses: codecov/codecov-action@v7
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
+      run: composer test -- --coverage-text

@@ -1,4 +1,4 @@
-# Steam OpenID Authentication for PHP [![Packagist](https://img.shields.io/packagist/dt/xpaw/steam-openid.svg)](https://packagist.org/packages/xpaw/steam-openid) [![codecov](https://codecov.io/gh/xPaw/SteamOpenID.php/graph/badge.svg?token=TA8tz7bpHy)](https://codecov.io/gh/xPaw/SteamOpenID.php)
+# Steam OpenID Authentication for PHP [![Packagist](https://img.shields.io/packagist/dt/xpaw/steam-openid.svg)](https://packagist.org/packages/xpaw/steam-openid)
 
 A very minimalistic OpenID implementation that hardcodes it for Steam only,
 as using a generic OpenID library may do unnecessary steps of “discovering”
